@@ -15,31 +15,72 @@ concurrency:
 
 jobs:
   test:
-    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message || '', '[test-paper]') || github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
+
       - name: Check commit marker
         id: marker
+        shell: bash
         run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
             MESSAGE="$(git log -1 --format=%B "${{ github.event.pull_request.head.sha }}")"
-          elif [ "${{ github.event_name }}" = "push" ]; then
+          elif [[ "${{ github.event_name }}" == "push" ]]; then
             MESSAGE="${{ github.event.head_commit.message }}"
           else
             MESSAGE="[test-paper]"
           fi
-          if [[ "$MESSAGE" == *"[test-paper]"* ]]; then echo "run=true" >> "$GITHUB_OUTPUT"; else echo "run=false" >> "$GITHUB_OUTPUT"; fi
-      - name: Prepare tests
+          if [[ "$MESSAGE" == *"[test-paper]"* ]]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Prepare scripts, tests, and recursive package dependencies
         if: steps.marker.outputs.run == 'true'
+        shell: bash
         run: |
-          mkdir -p build/libs tests/0_scripts
-          curl -L -o build/libs/skript-reflect.jar https://github.com/SkriptLang/skript-reflect/releases/download/v2.6.3/skript-reflect-2.6.3.jar
+          set -euo pipefail
+          mkdir -p build/libs tests/0_scripts "$RUNNER_TEMP/package-deps"
+          curl --fail --location --silent --show-error             -o build/libs/skript-reflect.jar             https://github.com/SkriptLang/skript-reflect/releases/download/v2.6.3/skript-reflect-2.6.3.jar
           rsync -av src/ tests/0_scripts/
-          cp -R -- -tests/. tests/
+          if [[ -d -tests ]]; then
+            cp -R -- -tests/. tests/
+          fi
+
+          install_package() {
+            local url="$1"
+            local repo_url="${url%%#*}"
+            local name
+            name="$(basename "${repo_url%.git}")"
+            local dir="$RUNNER_TEMP/package-deps/$name"
+            [[ -d "$dir/.git" ]] && return 0
+            git clone --depth 1 "$repo_url" "$dir"
+            if [[ -d "$dir/src" ]]; then
+              rsync -av "$dir/src/" tests/0_scripts/
+            fi
+            if [[ -f "$dir/package.txt" ]]; then
+              while IFS= read -r dep_line; do
+                dep_line="${dep_line#packages:}"
+                for dependency in $dep_line; do
+                  install_package "$dependency"
+                done
+              done < <(grep '^packages:' "$dir/package.txt" || true)
+            fi
+          }
+
+          install_package https://github.com/devdinc/runtime-test-framework
+          while IFS= read -r dep_line; do
+            dep_line="${dep_line#packages:}"
+            for dependency in $dep_line; do
+              install_package "$dependency"
+            done
+          done < <(grep '^packages:' package.txt || true)
+
       - name: Run tests on Skript 2.15.0
         if: steps.marker.outputs.run == 'true'
         uses: SkriptLang/skript-test-action@v1.3
@@ -49,6 +90,7 @@ jobs:
           skript_repo_ref: 2.15.0
           extra_plugins_directory: build/libs
           run_vanilla_tests: false
+
       - name: Run tests on latest Skript
         if: steps.marker.outputs.run == 'true'
         uses: SkriptLang/skript-test-action@v1.3
