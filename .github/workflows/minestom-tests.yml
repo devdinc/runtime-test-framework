@@ -2,10 +2,10 @@ name: Minestom tests
 
 on:
   push:
-    branches: [stable, dev]
+    branches: [main]
     paths: ['**', '.github/workflows/**']
   pull_request:
-    branches: [stable, dev]
+    branches: [main]
     paths: ['**', '.github/workflows/**']
   workflow_dispatch:
 
@@ -23,7 +23,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p tests/0_scripts "$RUNNER_TEMP/package-deps"
-          rsync -av src/ tests/0_scripts/
+          rsync -av --exclude='runtime-test-framework.sk' src/ tests/0_scripts/
           if [[ -d -tests ]]; then
             cp -R -- -tests/. tests/
           fi
