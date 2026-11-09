@@ -1,0 +1,30 @@
+name: Minestom tests
+
+on:
+  push:
+    branches: [stable, dev]
+    paths: ['**', '.github/workflows/**']
+  pull_request:
+    branches: [stable, dev]
+    paths: ['**', '.github/workflows/**']
+  workflow_dispatch:
+
+concurrency:
+  group: minestom-tests-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare scripts and tests
+        run: |
+          mkdir -p tests/0_scripts
+          rsync -av src/ tests/0_scripts/
+          cp -R -- -tests/. tests/
+      - name: Run Skript tests
+        uses: devdinc/skript-minestom-test-action@main
+        with:
+          test_script_directory: tests
+          test_framework_url: https://raw.githubusercontent.com/devdinc/skripts/minestomrework/scripts/utils/runtime-test-framework/runtime-test-framework.sk
