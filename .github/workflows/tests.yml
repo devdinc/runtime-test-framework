@@ -1,0 +1,59 @@
+name: Paper tests
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [stable, dev]
+    paths: ['**', '.github/workflows/**']
+  pull_request:
+    branches: [stable, dev]
+    paths: ['**', '.github/workflows/**']
+
+concurrency:
+  group: paper-tests-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message || '', '[test-paper]') || github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - name: Check commit marker
+        id: marker
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            MESSAGE="$(git log -1 --format=%B "${{ github.event.pull_request.head.sha }}")"
+          elif [ "${{ github.event_name }}" = "push" ]; then
+            MESSAGE="${{ github.event.head_commit.message }}"
+          else
+            MESSAGE="[test-paper]"
+          fi
+          if [[ "$MESSAGE" == *"[test-paper]"* ]]; then echo "run=true" >> "$GITHUB_OUTPUT"; else echo "run=false" >> "$GITHUB_OUTPUT"; fi
+      - name: Prepare tests
+        if: steps.marker.outputs.run == 'true'
+        run: |
+          mkdir -p build/libs tests/0_scripts
+          curl -L -o build/libs/skript-reflect.jar https://github.com/SkriptLang/skript-reflect/releases/download/v2.6.3/skript-reflect-2.6.3.jar
+          rsync -av src/ tests/0_scripts/
+          cp -R -- -tests/. tests/
+      - name: Run tests on Skript 2.15.0
+        if: steps.marker.outputs.run == 'true'
+        uses: SkriptLang/skript-test-action@v1.3
+        with:
+          skript_repo_url: https://github.com/SkriptLang/Skript.git
+          test_script_directory: tests
+          skript_repo_ref: 2.15.0
+          extra_plugins_directory: build/libs
+          run_vanilla_tests: false
+      - name: Run tests on latest Skript
+        if: steps.marker.outputs.run == 'true'
+        uses: SkriptLang/skript-test-action@v1.3
+        with:
+          skript_repo_url: https://github.com/SkriptLang/Skript.git
+          test_script_directory: tests
+          extra_plugins_directory: build/libs
+          run_vanilla_tests: false
