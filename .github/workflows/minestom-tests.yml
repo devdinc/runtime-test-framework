@@ -18,13 +18,50 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Prepare scripts and tests
+      - name: Prepare scripts, tests, and package dependencies
+        shell: bash
         run: |
-          mkdir -p tests/0_scripts
+          set -euo pipefail
+          mkdir -p tests/0_scripts "$RUNNER_TEMP/package-deps"
           rsync -av src/ tests/0_scripts/
-          cp -R -- -tests/. tests/
+          if [[ -d -tests ]]; then
+            cp -R -- -tests/. tests/
+          fi
+
+          install_package() {
+            local url="$1"
+            local name
+            name="$(basename "${url%%#*}" .git)"
+            local dir="$RUNNER_TEMP/package-deps/$name"
+
+            if [[ -d "$dir/.git" ]]; then
+              return
+            fi
+
+            git clone --depth 1 "$url" "$dir"
+            if [[ -d "$dir/src" ]]; then
+              rsync -av "$dir/src/" tests/0_scripts/
+            fi
+
+            if [[ -f "$dir/package.txt" ]]; then
+              while IFS= read -r line; do
+                line="${line#packages:}"
+                for dependency in $line; do
+                  install_package "$dependency"
+                done
+              done < <(grep '^packages:' "$dir/package.txt" || true)
+            fi
+          }
+
+          while IFS= read -r line; do
+            line="${line#packages:}"
+            for dependency in $line; do
+              install_package "$dependency"
+            done
+          done < <(grep '^packages:' package.txt || true)
+
       - name: Run Skript tests
         uses: devdinc/skript-minestom-test-action@main
         with:
           test_script_directory: tests
-          test_framework_url: https://raw.githubusercontent.com/devdinc/skripts/minestomrework/scripts/utils/runtime-test-framework/runtime-test-framework.sk
+          test_framework_url: https://raw.githubusercontent.com/devdinc/runtime-test-framework/main/src/runtime-test-framework.sk
